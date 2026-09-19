@@ -1,0 +1,98 @@
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build x86_64-unknown-linux-gnu
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libssl-dev \
+            pkg-config \
+            libwebkit2gtk-4.1-dev \
+            libgtk-4-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            build-essential \
+            clang
+
+      - name: Build release
+        run: cargo build --release --locked
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Strip binary
+        run: strip target/release/aichat-ng
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aichat-ng-x86_64-unknown-linux-gnu
+          path: target/release/aichat-ng
+          retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: aichat-ng-x86_64-unknown-linux-gnu
+          path: ./release
+
+      - name: Create checksum
+        run: |
+          cd release
+          sha256sum aichat-ng > aichat-ng.sha256
+          cat aichat-ng.sha256
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/aichat-ng
+            release/aichat-ng.sha256
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
